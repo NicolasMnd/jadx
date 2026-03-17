@@ -4,12 +4,17 @@ import com.diffplug.spotless.LineEnding
 import com.github.benmanes.gradle.versions.updates.DependencyUpdatesTask
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 import java.util.Locale
+import org.gradle.jvm.toolchain.JavaToolchainService
 
 plugins {
+	id("java")
+	id("jacoco")
 	id("com.github.ben-manes.versions") version "0.53.0"
 	id("se.patrikerdes.use-latest-versions") version "0.2.19"
 	id("com.diffplug.spotless") version "6.25.0"
+	id("info.solidsoft.pitest") version "1.19.0-rc.3" apply false
 }
+
 
 val jadxVersion by extra { System.getenv("JADX_VERSION") ?: "dev" }
 println("jadx version: $jadxVersion")
@@ -29,13 +34,76 @@ fun getBuildJavaVersion(): Int? {
 
 allprojects {
 	apply(plugin = "java")
+	apply(plugin = "jacoco")
 	apply(plugin = "checkstyle")
 	apply(plugin = "com.diffplug.spotless")
 	apply(plugin = "com.github.ben-manes.versions")
 	apply(plugin = "se.patrikerdes.use-latest-versions")
 
+	if (this != rootProject) {
+		apply(plugin = "info.solidsoft.pitest")
+	}
+
 	repositories {
 		mavenCentral()
+	}
+
+	dependencies {
+		// JUnit 5 for all modules
+		testImplementation("org.junit.jupiter:junit-jupiter-api:5.13.3")
+		testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.13.3")
+	}
+
+	// Make sure Gradle runs tests on the JUnit Platform (needed for JUnit 5 discovery).
+	tasks.withType<Test>().configureEach {
+		useJUnitPlatform()
+		finalizedBy(tasks.named("jacocoTestReport"))
+		jadxBuildJavaVersion?.let { testJavaVer ->
+			val toolchains = project.extensions.getByType(JavaToolchainService::class.java)
+			javaLauncher = toolchains.launcherFor {
+				languageVersion = JavaLanguageVersion.of(testJavaVer)
+			}
+		}
+	}
+
+	tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {
+		dependsOn(tasks.named("test"))
+
+		reports {
+			xml.required.set(true)
+			html.required.set(true)
+			csv.required.set(false)
+		}
+	}
+
+	// --- PIT + JUnit 5 wiring (applies only to subprojects that have the PIT Gradle plugin) ---
+	plugins.withId("info.solidsoft.pitest") {
+		// Ensure PIT has the JUnit 5 adapter on its *own* tool classpath (not just the project test classpath).
+		dependencies {
+			add("pitest", "org.pitest:pitest-junit5-plugin:1.2.3")
+			add("pitest", "org.junit.platform:junit-platform-launcher:1.10.2")
+		}
+		// Default PIT configuration for all subprojects (override in a module build.gradle.kts if needed)
+		configure<info.solidsoft.gradle.pitest.PitestPluginExtension> {
+			// JUnit 5 support (adds pitest-junit5-plugin and enables junit5)
+			junit5PluginVersion.set("1.2.3")
+
+			// Use a recent PIT core (plugin default is usually fine; override explicitly for reproducibility)
+			pitestVersion.set("1.22.1")
+
+			threads.set(4)
+			outputFormats.set(setOf("XML", "HTML"))
+			timestampedReports.set(false)
+
+
+			// If your Gradle `group` is not set, configure this to your base package (recommended)
+			targetClasses.set(setOf("jadx.plugins.input.*"))
+		}
+
+		tasks.matching { it.name == "check" }.configureEach {
+			// Do NOT use task reference `pitest` directly here, use the name to avoid resolving the `pitest` configuration.
+			dependsOn("pitest")
+		}
 	}
 
 	configure<SpotlessExtension> {

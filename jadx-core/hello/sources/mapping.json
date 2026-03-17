@@ -1,0 +1,24 @@
+{
+  "classes": [
+    {
+      "name": "HelloWorld",
+      "alias": "defpackage.HelloWorld",
+      "json": "defpackage/HelloWorld.json",
+      "inner": false,
+      "methods": [
+        {
+          "signature": "<init>()V",
+          "name": "<init>",
+          "alias": "<init>",
+          "offset": "0x130"
+        },
+        {
+          "signature": "main([Ljava/lang/String;)V",
+          "name": "main",
+          "alias": "main",
+          "offset": "0x148"
+        }
+      ]
+    }
+  ]
+}
